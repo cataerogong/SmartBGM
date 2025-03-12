@@ -1,5 +1,5 @@
+; CodePage=GB2312
 #SingleInstance
-;#NoTrayIcon
 
 #Include VA.ahk
 
