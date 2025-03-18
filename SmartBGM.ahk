@@ -3,6 +3,8 @@
 
 #Include VA.ahk
 
+DetectHiddenWindows, On
+
 ; ----------------------------
 ; 配置部分
 ; ----------------------------
@@ -15,11 +17,11 @@ IcoFile := A_ScriptDir . "\" . A_ScriptName . ".ico"
 
 if !FileExist(IniFile)
 {
-    IniWrite, `; 将 <BGM exe> 替换为 BGM 音乐程序的文件名。示例：BGMWinTitle=ahk_exe MusicPlayer.exe`nBGMWinTitle=`n`; BGM 音量切换模式: 瞬 - 立刻切换静音，渐 - 慢慢调整音量`nSwitchMode=瞬`n; 自动开始`nAutoStart=0, %IniFile%, %AppName%
+    IniWrite, `; BGM 程序文件名。示例：BGMExe=MusicPlayer.exe`nBGMExe=`n`; BGM 音量切换模式: 瞬 - 立刻切换静音，渐 - 慢慢调整音量`nSwitchMode=瞬`n; 自动开始监控 [0|1]`nAutoStart=0, %IniFile%, %AppName%
 }
 
 ; 读取配置文件
-IniRead, BGMWinTitle, %IniFile%, %AppName%, BGMWinTitle, %A_Space%  ; 需要调节音量的 BGM 程序
+IniRead, BGMExe, %IniFile%, %AppName%, BGMExe, %A_Space%  ; 需要调节音量的 BGM 程序
 IniRead, SwitchMode, %IniFile%, %AppName%, SwitchMode, 瞬  ; 切换风格（瞬 | 渐），默认“瞬”
 IniRead, AutoStart, %IniFile%, %AppName%, AutoStart, 0  ; 自动开始
 
@@ -40,7 +42,7 @@ InitGUI()
 
 If AutoStart
 {
-    Goto OnBtnStart
+    Gosub, OnBtnStart
 }
 
 Return
@@ -48,25 +50,24 @@ Return
 InitGUI()
 {
     Global
-    ;Gui, +Border
     Gui, Margin, 10, 10
     Gui, Add, Text, xm ym h20, BGM 程序
-    Gui, Add, Edit, x+10 yp-3 h20 w300 vEdtBGMWin, %BGMWinTitle%
-	Gui, Add, Button, x+ yp h20 gOnBtnSelBGM, …
-    Gui, Add, Text, xm y+m h20, 音量切换风格
-    ; Gui, Add, DropDownList, x+10 yp-3 w50 vDdlBGMMode, 瞬|渐
+    Gui, Add, Edit, x+10 yp-3 h20 w300 vEdtBGMWin, %BGMExe%
+	Gui, Add, Button, x+ yp h20 gOnBtnPlaying, …
+    Gui, Add, Text, xm y+m h20, 音量调节方式
     Gui, Add, Radio, x+10 yp-3 h20 Group vRadBGMMode1, 瞬
     Gui, Add, Radio, x+10 yp h20 vRadBGMMode2, 渐
-    Gui, Add, CheckBox, xm y+m h20 vChkAutoStart, 自动开始
+    Gui, Add, CheckBox, xm y+m h20 vChkAutoStart, 自动开始监控
 	Gui, Add, Button, xm y+m h20 vBtnApplyCfg gOnBtnApplyCfg, 应用设置
 	Gui, Add, Button, x+10 yp h20 vBtnStart gOnBtnStart, 开始监控
 	Gui, Add, Button, x+10 yp h20 Disabled vBtnStop gOnBtnStop, 停止监控
-	Gui, Add, Button, x+10 yp h20 vBtnPlaying gOnBtnPlaying, 正在播放
+	Gui, Add, Button, x+10 yp h20 vBtnReset gOnBtnReset, 恢复音量
 	Gui, Add, Button, x+20 yp h20 gOnBtnAbout, 关于
     Gui, Add, StatusBar, ,
+    SB_SetParts(300)
+    Tip("未监控", 2)
     Gui, Show, , %AppName% v%AppVer%
 	Gui, +OwnDialogs
-    ; GuiControl, ChooseString, DdlBGMMode, %SwitchMode%
     GuiControl, , %SwitchMode%, 1
     GuiControl, , ChkAutoStart, %AutoStart%
 }
@@ -76,37 +77,34 @@ ShowGui:
     Gui, Show
     Return
 }
-
 GuiSize:
 {
-    If (A_EventInfo == 1)
-    {
-        Gui, Hide
-    }
+    If (A_EventInfo == 1) ; 最小化到系统托盘
+        Gosub, GuiEscape
     Return
 }
-
-GuiEscape:
+GuiEscape: ; 最小化到系统托盘
 {
+    TrayTip, %AppName%, 已隐藏到系统托盘，双击恢复
     Gui, Hide
     Return
 }
-
 GuiClose:
 {
-    RestoreBGM()
+    Gosub, OnBtnStop
     ExitApp
     Return
 }
 OnBtnApplyCfg:
 {
     Gui, 1:Submit, NoHide
-    BGMWinTitle := EdtBGMWin
+    BGMExe := EdtBGMWin
     SwitchMode := RadBGMMode1 ? "瞬" : "渐"
     AutoStart := ChkAutoStart
-    IniWrite, %BGMWinTitle%, %IniFile%, %AppName%, BGMWinTitle
+    IniWrite, %BGMExe%, %IniFile%, %AppName%, BGMExe
     IniWrite, %SwitchMode%, %IniFile%, %AppName%, SwitchMode
     IniWrite, %AutoStart%, %IniFile%, %AppName%, AutoStart
+    Tip("设置已生效", 2)
     Return
 }    
 OnBtnStart:
@@ -114,61 +112,24 @@ OnBtnStart:
     SetTimer, CheckAudioState, 500
     GuiControl, Disable, BtnStart
     GuiControl, Enable, BtnStop
-    Tip("开始监控")
+    Tip("开始监控 ...", 2)
     Return
 }
 OnBtnStop:
 {
+    Tip("正在停止 ...", 2)
     SetTimer, CheckAudioState, Off
-    RestoreBGM()
     GuiControl, Disable, BtnStop
+    Sleep, 1000
     GuiControl, Enable, BtnStart
-    Tip("停止监控")
+    Tip("未监控", 2)
+    Gosub, OnBtnReset
     Return
 }
-;------------------------------------------------------------------------------
-; 窗口选择
-OnBtnSelBGM:
+OnBtnReset:  ; 恢复BGM程序静音状态和音量
 {
-    Gui, SelBGM:+Owner1 +ToolWindow
-    Gui, SelBGM:Add, Text, xm ym, * 双击选择 BGM 程序
-    Gui, SelBGM:Add, ListBox, xm y+m r10 w500 Sort 0x100 vLstWin gOnSelBGM
-    Gui, SelBGM:Show, , %AppName% - 选择 BGM 程序
-
-	Gui, 1:+Disabled
-
-    GuiControl, SelBGM:-Redraw, LstWin
-    WinGet, AllWins, List
-    Loop % AllWins
-    {
-        id := AllWins%A_Index%
-        WinGet, pn, ProcessName, ahk_id %id%
-        If (pn)
-            GuiControl, SelBGM:, LstWin, %pn%
-    }
-    ; GuiControl, SelBGM:, LstWin, END|BB
-    GuiControl, SelBGM:+Redraw, LstWin
-
+    ResetVol(BGMExe)
     Return
-}
-OnSelBGM:
-{
-    If (A_GuiEvent == "DoubleClick")
-    {
-        Gui, SelBGM:Submit
-        BGMWinTitle := "ahk_exe " . LstWin
-        GuiControl, 1:, EdtBGMWin, %BGMWinTitle%
-        Goto SelBGMGuiClose
-    }
-    Return
-}
-SelBGMGuiClose:
-SelBGMGuiEscape:
-{
-	Gui, SelBGM:Destroy
-    Gui, 1:-Disabled
-    Gui, 1:Show
-	Return
 }
 
 ;------------------------------------------------------------------------------
@@ -176,8 +137,8 @@ SelBGMGuiEscape:
 OnBtnPlaying:
 {
     Gui, Playing:+Owner1 +ToolWindow
-    Gui, Playing:Add, Text, xm ym, * 行首标志含义：1: A - active; 2: M - muted; 3: 音量`%; 4: PID进程号
-    Gui, Playing:Add, ListBox, xm y+m r10 w500 ReadOnly Sort 0x100 vLstPlaying
+    Gui, Playing:Add, Text, xm ym, * 双击选择 BGM 程序`n* 行首标志含义：1: A - active; 2: M - muted; 3: 音量`%; 4: PID进程号
+    Gui, Playing:Add, ListBox, xm y+m r10 w500 Sort 0x100 vLstPlaying gOnLstPlaying
     Gui, Playing:Show, , %AppName% - 正在播放
 
     Gui, 1:+Disabled
@@ -210,24 +171,22 @@ OnBtnPlaying:
             VA_IAudioSessionControl2_GetProcessID(IASC2, SPID)
             if (SPID) ; 跳过没有 PID 的 Session
             {
-                ; 获取 ISimpleAudioVolume obj
-                ISAV := ComObjQuery(IASC2, IID_ISAV)
-                ; 获取会话状态
-                VA_IAudioSessionControl_GetState(IASC, state) ; 0=Inactive, 1=Active, 2=Expired
-                ; 获取静音状态
-                VA_ISimpleAudioVolume_GetMute(ISAV, muted)
-                VA_ISimpleAudioVolume_GetMasterVolume(ISAV, vol)
-                a := state==1 ? "A" : " "
-                m := muted ? "M" : " "
-                v := Round(vol*100)
-                ; if (state == 1 && !muted)
+                pn := GetProcNameByPID(SPID)
+                if (pn)
                 {
-                    WinGetTitle, playingWin, ahk_pid %SPID%
-                    If !playingWin
-                        WinGet, playingWin, ProcessName, ahk_pid %SPID%
-                    GuiControl, Playing:, LstPlaying, %a% %m% %v%`% PID=%SPID% : %playingWin%
+                    ; 获取 ISimpleAudioVolume obj
+                    ISAV := ComObjQuery(IASC2, IID_ISAV)
+                    ; 获取会话状态
+                    VA_IAudioSessionControl_GetState(IASC, state) ; 0=Inactive, 1=Active, 2=Expired
+                    ; 获取静音状态
+                    VA_ISimpleAudioVolume_GetMute(ISAV, muted)
+                    VA_ISimpleAudioVolume_GetMasterVolume(ISAV, vol)
+                    ObjRelease(ISAV)
+                    a := state==1 ? "A" : " "
+                    m := muted ? "M" : " "
+                    v := Round(vol*100)
+                    GuiControl, Playing:, LstPlaying, %a% %m% %v%`% PID=%SPID% : %pn%
                 }
-                ObjRelease(ISAV)
             }
 
             ObjRelease(IASC)
@@ -241,6 +200,22 @@ OnBtnPlaying:
     }
     GuiControl, Playing:+Redraw, LstPlaying
 
+    Return
+}
+OnLstPlaying:
+{
+    If (A_GuiEvent == "DoubleClick")
+    {
+        Gui, Playing:Submit
+        arr := StrSplit(LstPlaying, ":", " `t")
+        n := arr.Length()
+        If (n)
+        {
+            exe := arr[n]
+            GuiControl, 1:, EdtBGMWin, %exe%
+        }
+        Gosub, PlayingGuiClose
+    }
     Return
 }
 PlayingGuiClose:
@@ -282,7 +257,7 @@ ABOUTOK:
 	return
 }
 
-Tip(msg)
+Tip(msg, sb_part:=1)
 {
     Global AppName
     Static OldMsg := ""
@@ -291,7 +266,7 @@ Tip(msg)
     if (msg != OldMsg)
     {
         ; TrayTip, %AppName%, %msg%
-        SB_SetText(msg)
+        SB_SetText(msg, sb_part)
         OldMsg := msg
     }
 }
@@ -299,9 +274,11 @@ Tip(msg)
 CheckAudioState()
 {
     Global IID_IASM2, IID_IASC2, IID_ISAV
-    Global BGMWinTitle
+    Global BGMExe, SwitchMode
 
-    if (!WinExist(BGMWinTitle))
+    Tip("监控中 ...", 2)
+
+    if (!WinExist("ahk_exe " . BGMExe))
     {
         Tip("BGM 未运行")
         return
@@ -340,7 +317,10 @@ CheckAudioState()
             ISAV := ComObjQuery(IASC2, IID_ISAV)
             ; 获取会话状态
             VA_IAudioSessionControl_GetState(IASC, state) ; 0=Inactive, 1=Active, 2=Expired
-            if (WinExist(BGMWinTitle . " ahk_pid " . SPID)) ; 检测 BGM 程序
+            VA_ISimpleAudioVolume_GetMute(ISAV, muted)
+            VA_ISimpleAudioVolume_GetMasterVolume(ISAV, vol)
+            ; if (WinExist(BGMExe . " ahk_pid " . SPID)) ; 检测 BGM 程序
+            if (GetProcNameByPID(SPID) = BGMExe)  ; 忽略大小写
             {
                 BGM_Active := (state == 1)
                 BGM_ISAV := ISAV ; 保留 BGM 程序 ISAV
@@ -348,8 +328,6 @@ CheckAudioState()
             else ; 检测其他程序
             {
                 ; 获取静音状态
-                VA_ISimpleAudioVolume_GetMute(ISAV, muted)
-                VA_ISimpleAudioVolume_GetMasterVolume(ISAV, vol)
                 if (state == 1 && !muted && vol > 0)
                 {
                     OtherPlaying := true
@@ -364,14 +342,25 @@ CheckAudioState()
 
     if (BGM_Active)
     {
-        if (OtherPlaying)
+        delta := SwitchMode=="瞬" ? 1 : 0.2
+        ; 获取音量
+        VA_ISimpleAudioVolume_GetMasterVolume(BGM_ISAV, vol)
+        if (OtherPlaying && vol>0)
         {
-            BGMDown(BGM_ISAV)
+            vol := (vol-delta<0) ? 0 : (vol-delta)
+            VA_ISimpleAudioVolume_SetMasterVolume(BGM_ISAV, vol)
         }
-        else
+        else if (!OtherPlaying && vol<1)
         {
-            BGMUp(BGM_ISAV)
+            vol := (vol+delta>1) ? 1 : (vol+delta)
+            VA_ISimpleAudioVolume_SetMasterVolume(BGM_ISAV, vol)
         }
+        ; 显示状态
+        Tip("BGM 音量：" . Round(vol*100) . "%")
+    }
+    else
+    {
+        Tip("BGM 未播放")
     }
 
     ; 清理资源
@@ -381,62 +370,29 @@ CheckAudioState()
     ObjRelease(DAE)
 }
 
-BGMDown(ISAV)
+SwitchBGM(ISAV, otherPlaying)
 {
     Global SwitchMode
-    ; 获取音量
-    VA_ISimpleAudioVolume_GetMasterVolume(ISAV, vol)
-    if (vol > 0)
-    {
-        delta := SwitchMode=="瞬" ? 1 : 0.2
-        vol := (vol-delta<0) ? 0 : (vol-delta)
-        VA_ISimpleAudioVolume_SetMasterVolume(ISAV, vol)
-        Msg := "BGM 音量：" . Round(vol*100) . "%"
-    }
-    ; 显示状态
-    Tip(Msg)
 }
 
-BGMUp(ISAV)
-{
-    Global SwitchMode
-    ; 获取音量
-    VA_ISimpleAudioVolume_GetMasterVolume(ISAV, vol)
-    if (vol < 1)
-    {
-        delta := SwitchMode=="瞬" ? 1 : 0.2
-        vol := (vol+delta>1) ? 1 : (vol+delta)
-        VA_ISimpleAudioVolume_SetMasterVolume(ISAV, vol)
-        Msg := "BGM 音量：" . Round(vol*100) . "%"
-    }
-    ; 显示状态
-    Tip(Msg)
-}
-
-RestoreBGM()
+; 重置程序静音状态和音量
+ResetVol(exe = "")
 {
     Global IID_IASM2, IID_IASC2, IID_ISAV
-    Global BGMWinTitle
-
-    if (!WinExist(BGMWinTitle))
-    {
-        return
-    }
 
     ; 获取默认播放设备的会话管理器 GetDefaultAudioEndpoint
-    if !DAE := VA_GetDevice()
+    DAE := VA_GetDevice()
+    If !DAE
     {
-        return
+        Tip("无法获取音频设备")
+        Return
     }
-
     ; 激活会话管理器2接口 activate the session manager
     VA_IMMDevice_Activate(DAE, IID_IASM2, 0, 0, IASM2)
     ; 获取会话枚举器 enumerate sessions for on this device
     VA_IAudioSessionManager2_GetSessionEnumerator(IASM2, IASE)
     ; 获取会话数量
     VA_IAudioSessionEnumerator_GetCount(IASE, Count)
-
-    BGM_ISAV := 0
 
     ; 遍历所有音频会话
     Loop % Count
@@ -451,32 +407,44 @@ RestoreBGM()
         {
             ; 获取 ISimpleAudioVolume obj
             ISAV := ComObjQuery(IASC2, IID_ISAV)
-            ; 获取会话状态
-            VA_IAudioSessionControl_GetState(IASC, state) ; 0=Inactive, 1=Active, 2=Expired
-            if (WinExist(BGMWinTitle . " ahk_pid " . SPID)) ; 检测 BGM 程序
+            ; 获取静音状态
+            VA_ISimpleAudioVolume_GetMute(ISAV, muted)
+            VA_ISimpleAudioVolume_GetMasterVolume(ISAV, vol)
+            if (muted || vol != 1)  ; 状态不对
             {
-                BGM_Active := (state == 1)
-                BGM_ISAV := ISAV ; 保留 BGM 程序 ISAV
-                Break
+                if (!exe || GetProcNameByPID(SPID) = exe)  ; 忽略大小写
+                {
+                    VA_ISimpleAudioVolume_SetMute(ISAV, 0)
+                    VA_ISimpleAudioVolume_SetMasterVolume(ISAV, 1)
+                }
             }
+            ObjRelease(ISAV)
         }
 
         ObjRelease(IASC)
         ObjRelease(IASC2)
     }
-    if (BGM_Active)
-    {
-        ; VA_ISimpleAudioVolume_SetMute(BGM_ISAV, 0)
-        VA_ISimpleAudioVolume_SetMasterVolume(BGM_ISAV, 1)
-    }
 
     ; 清理资源
-    ObjRelease(BGM_ISAV)
     ObjRelease(IASE)
     ObjRelease(IASM2)
     ObjRelease(DAE)
+
+    Return
 }
 
+GetProcNameByPID(pid)
+{
+    procName := ""
+    WMI := ComObjGet("winmgmts:")
+    queryEnum := WMI.ExecQuery("Select * from Win32_Process where ProcessId=" . pid)._NewEnum()
+    if queryEnum[proc]
+    {
+        procName := proc.Name
+    }
+    WMI := queryEnum := proc := ""
+    Return procName
+}
 
 
 ;
